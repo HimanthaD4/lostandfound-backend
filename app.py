@@ -37,10 +37,12 @@ CORS(app, resources={
     }
 })
 
+# MongoDB connection
 mongodb_uri = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
 client = MongoClient(mongodb_uri, connectTimeoutMS=30000, socketTimeoutMS=30000)
+db = client['device_tracker']
 
-# Create unique index for device_id across all users
+# Create unique index for device_id across all users - MOVED AFTER db DEFINITION
 try:
     db.users.create_index([("devices.device_id", 1)], unique=True, sparse=True)
     print("✅ Unique index created for device_id across all users")
@@ -602,7 +604,7 @@ class AnomalyDetector:
         prediction = self.model.predict([features])
         return prediction[0] == -1
 
-# Initialize models
+# Initialize models - MOVED AFTER db DEFINITION
 user_model = UserModel(db)
 alert_model = AlertModel(db)
 anomaly_detector = AnomalyDetector()
