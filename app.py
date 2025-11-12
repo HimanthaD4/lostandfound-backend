@@ -26,7 +26,7 @@ cors_origins = [
     "http://192.168.1.125:3000", 
     "http://127.0.0.1:3000", 
     "http://10.185.94.208:3000",
-    "https://your-frontend-app.onrender.com"  # Add your future frontend URL
+    "https://lostandfound-client-nu.vercel.app/"  # Add your future frontend URL
 ]
 
 CORS(app, resources={
