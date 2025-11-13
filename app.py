@@ -26,14 +26,15 @@ cors_origins = [
     "http://192.168.1.125:3000", 
     "http://127.0.0.1:3000", 
     "http://10.185.94.208:3000",
-    "https://lostandfound-client-nu.vercel.app/"  # Add your future frontend URL
+    "https://lostandfound-client-nu.vercel.app"  # Remove trailing slash
 ]
 
 CORS(app, resources={
     r"/api/*": {
         "origins": cors_origins,
         "methods": ["GET", "POST", "PUT", "DELETE"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
     }
 })
 
@@ -627,6 +628,17 @@ def generate_device_id(email, user_agent, client_ip):
     device_string = f"{email}_{user_agent}"
     return hashlib.md5(device_string.encode()).hexdigest()
 
+
+@app.route('/')
+@cross_origin()
+def home():
+    return jsonify({
+        'message': 'Device Tracker Backend is running!',
+        'status': 'healthy',
+        'timestamp': datetime.now(timezone.utc).isoformat()
+    }), 200
+
+
 @app.route('/api/register', methods=['POST'])
 @cross_origin()
 def register():
@@ -1048,11 +1060,11 @@ def test_connection():
     return jsonify({'message': 'Backend is working!', 'timestamp': datetime.now(timezone.utc).isoformat()}), 200
 
 if __name__ == '__main__':
-    print("Starting Flask server...")
-    print("Backend URL: http://localhost:5000")
-    print("API Health Check: http://localhost:5000/api/health")
-    print("API Test: http://localhost:5000/api/test")
+    port = int(os.environ.get('PORT', 5000))
+    print(f"Starting Flask server on port {port}...")
+    print(f"Backend URL: http://0.0.0.0:{port}")
+    print(f"API Health Check: http://0.0.0.0:{port}/api/health")
     print("✅ Device uniqueness enforcement: ENABLED")
     print("🎯 Behavior Learning Engine: ENABLED")
-    print("🔧 FIXED: Consistent device ID generation")
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    
+    app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
