@@ -13,17 +13,20 @@ import time
 import logging
 import os
 
+# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "your-secret-key-here"
 
+# Configure CORS properly for all origins during development
+# CORS configuration for both development and production
 cors_origins = [
     "http://localhost:3000", 
     "http://192.168.1.125:3000", 
     "http://127.0.0.1:3000", 
     "http://10.185.94.208:3000",
-    "https://lostandfound-client-nu.vercel.app"
+    "https://lostandfound-client-nu.vercel.app"  # Remove trailing slash
 ]
 
 CORS(app, resources={
@@ -35,16 +38,19 @@ CORS(app, resources={
     }
 })
 
+# MongoDB connection
 mongodb_uri = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
 client = MongoClient(mongodb_uri, connectTimeoutMS=30000, socketTimeoutMS=30000)
 db = client['device_tracker']
 
+# Create unique index for device_id across all users - MOVED AFTER db DEFINITION
 try:
     db.users.create_index([("devices.device_id", 1)], unique=True, sparse=True)
     print("✅ Unique index created for device_id across all users")
 except Exception as e:
     print(f"⚠️ Index may already exist: {e}")
 
+# Custom JSON encoder to handle ObjectId and datetime
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, ObjectId):
@@ -58,7 +64,7 @@ app.json_encoder = JSONEncoder
 class BehaviorAnalyzer:
     def __init__(self):
         self.user_profiles = {}
-        self.learning_period = timedelta(minutes=7)
+        self.learning_period = timedelta(minutes=7)  # 7 minutes = 7 days simulation
         self.learning_start_times = {}
     
     def initialize_user_learning(self, email):
@@ -67,10 +73,10 @@ class BehaviorAnalyzer:
                 'learning_start': datetime.now(timezone.utc),
                 'behavior_learned': False,
                 'daily_patterns': {
-                    'morning_locations': [],
-                    'afternoon_locations': [], 
-                    'evening_locations': [],
-                    'night_locations': []
+                    'morning_locations': [],    # 6AM - 12PM
+                    'afternoon_locations': [],  # 12PM - 6PM  
+                    'evening_locations': [],    # 6PM - 12AM
+                    'night_locations': []       # 12AM - 6AM
                 },
                 'device_movement_patterns': {},
                 'typical_locations': {},
@@ -91,6 +97,7 @@ class BehaviorAnalyzer:
         device_id = device_data['device_id']
         device_type = device_data['device_type']
         
+        # Record location based on time of day
         location_point = {
             'latitude': location_data['latitude'],
             'longitude': location_data['longitude'], 
@@ -100,6 +107,7 @@ class BehaviorAnalyzer:
             'hour': hour
         }
         
+        # Categorize by time of day
         if 6 <= hour < 12:
             self.user_profiles[email]['daily_patterns']['morning_locations'].append(location_point)
         elif 12 <= hour < 18:
@@ -109,6 +117,7 @@ class BehaviorAnalyzer:
         else:
             self.user_profiles[email]['daily_patterns']['night_locations'].append(location_point)
         
+        # Update device movement patterns
         if device_id not in self.user_profiles[email]['device_movement_patterns']:
             self.user_profiles[email]['device_movement_patterns'][device_id] = {
                 'device_type': device_type,
@@ -120,8 +129,10 @@ class BehaviorAnalyzer:
         self.user_profiles[email]['device_movement_patterns'][device_id]['typical_locations'].append(location_point)
         self.user_profiles[email]['device_movement_patterns'][device_id]['movement_times'].append(current_time)
         
+        # Update learning progress
         self._update_learning_progress(email)
         
+        # Check if learning period is complete
         if self._is_learning_complete(email):
             self._finalize_behavior_learning(email)
     
@@ -129,6 +140,7 @@ class BehaviorAnalyzer:
         lat = location_data['latitude']
         lng = location_data['longitude']
         
+        # Simple campus section detection based on coordinates
         if 6.9265 <= lat <= 6.9275 and 79.8605 <= lng <= 79.8615:
             if lat > 6.9270:
                 return 'library' if lng < 79.8610 else 'lab'
@@ -147,7 +159,8 @@ class BehaviorAnalyzer:
         progress_percent = (progress_minutes / total_minutes) * 100
         self.user_profiles[email]['learning_progress'] = progress_percent
         
-        simulated_days = int(progress_minutes)
+        # Simulate day-by-day learning
+        simulated_days = int(progress_minutes)  # 1 minute = 1 day
         print(f"📅 {email}: Simulated {simulated_days}/7 days learned - {progress_percent:.1f}% complete")
     
     def _is_learning_complete(self, email):
@@ -156,6 +169,7 @@ class BehaviorAnalyzer:
     def _finalize_behavior_learning(self, email):
         profile = self.user_profiles[email]
         
+        # Analyze patterns and create rules
         self._analyze_daily_patterns(email)
         self._create_time_based_rules(email)
         self._calculate_schedule_consistency(email)
@@ -169,8 +183,10 @@ class BehaviorAnalyzer:
     def _analyze_daily_patterns(self, email):
         profile = self.user_profiles[email]
         
+        # Find most common locations for each time period
         for period, locations in profile['daily_patterns'].items():
             if locations:
+                # Simple clustering - find centroid of locations
                 lats = [loc['latitude'] for loc in locations]
                 lngs = [loc['longitude'] for loc in locations]
                 centroid_lat = sum(lats) / len(lats)
@@ -187,11 +203,13 @@ class BehaviorAnalyzer:
         profile = self.user_profiles[email]
         rules = {}
         
+        # Create rules based on device types and time patterns
         for device_id, device_pattern in profile['device_movement_patterns'].items():
             device_type = device_pattern['device_type']
             locations = device_pattern['typical_locations']
             
             if locations:
+                # Find most common location for this device
                 common_sections = {}
                 for loc in locations:
                     section = loc.get('campus_section', 'unknown')
@@ -201,6 +219,7 @@ class BehaviorAnalyzer:
                     most_common_section = max(common_sections, key=common_sections.get)
                     
                     if device_type == 'laptop':
+                        # Laptop should stay in library during day
                         rules[device_id] = {
                             'expected_locations': ['library', 'lab', 'classroom'],
                             'unexpected_times': {'night': 'Laptop should not move at night'},
@@ -208,6 +227,7 @@ class BehaviorAnalyzer:
                             'typical_section': most_common_section
                         }
                     elif device_type == 'mobile':
+                        # Mobile can move but should follow patterns
                         rules[device_id] = {
                             'expected_locations': ['library', 'lab', 'classroom', 'admin', 'outside_campus'],
                             'unexpected_times': {},
@@ -220,13 +240,15 @@ class BehaviorAnalyzer:
     def _calculate_schedule_consistency(self, email):
         profile = self.user_profiles[email]
         
+        # Calculate how consistent the user's schedule is
         total_locations = 0
         consistent_locations = 0
         
         for period, typical_loc in profile['typical_locations'].items():
             if typical_loc['count'] > 0:
                 total_locations += 1
-                if typical_loc['count'] >= 3:
+                # If user has significant locations in this period, consider it consistent
+                if typical_loc['count'] >= 3:  # At least 3 data points
                     consistent_locations += 1
         
         profile['schedule_consistency'] = consistent_locations / total_locations if total_locations > 0 else 0
@@ -242,21 +264,26 @@ class BehaviorAnalyzer:
         hour = current_time.hour
         current_section = self._get_campus_section(location_data)
         
+        # Get rules for this device
         device_rules = profile['time_based_rules'].get(device_id, {})
         
         anomalies = []
         
+        # Rule 1: Check if device is in unexpected location
         if device_rules and 'expected_locations' in device_rules:
             if current_section not in device_rules['expected_locations']:
                 anomalies.append(f"Device in unexpected location: {current_section}")
         
+        # Rule 2: Check for unusual movement times (especially for laptops)
         if device_type == 'laptop':
-            if hour < 6 or hour > 22:
+            if hour < 6 or hour > 22:  # Late night/early morning
                 anomalies.append("Laptop moving during unusual hours")
         
+        # Rule 3: Check if device separation is suspicious
         if self._suspicious_device_separation(email, device_data, location_data):
             anomalies.append("Suspicious device separation detected")
         
+        # Rule 4: Check against learned daily patterns
         period_anomaly = self._check_daily_pattern_anomaly(email, device_data, location_data, current_time)
         if period_anomaly:
             anomalies.append(period_anomaly)
@@ -267,10 +294,12 @@ class BehaviorAnalyzer:
         profile = self.user_profiles[email]
         current_device_type = current_device_data['device_type']
         
+        # If this is a mobile device, check if laptop is too far away
         if current_device_type == 'mobile':
             laptop_locations = []
             mobile_locations = []
             
+            # Get all device locations
             for device_id, device_pattern in profile['device_movement_patterns'].items():
                 if device_pattern['device_type'] == 'laptop' and device_pattern['typical_locations']:
                     latest_laptop_loc = device_pattern['typical_locations'][-1]
@@ -279,6 +308,7 @@ class BehaviorAnalyzer:
                     latest_mobile_loc = device_pattern['typical_locations'][-1]
                     mobile_locations.append(latest_mobile_loc)
             
+            # Check distance between mobile and laptop
             if laptop_locations and mobile_locations:
                 laptop_loc = laptop_locations[-1]
                 distance = self._calculate_distance(
@@ -286,8 +316,9 @@ class BehaviorAnalyzer:
                     laptop_loc['latitude'], laptop_loc['longitude']
                 )
                 
+                # If mobile is very far from laptop and it's during class hours
                 current_hour = datetime.now(timezone.utc).hour
-                if distance > 1000 and (9 <= current_hour <= 17):
+                if distance > 1000 and (9 <= current_hour <= 17):  # 1km during class hours
                     return True
         
         return False
@@ -297,6 +328,7 @@ class BehaviorAnalyzer:
         hour = current_time.hour
         current_section = self._get_campus_section(location_data)
         
+        # Determine time period
         if 6 <= hour < 12:
             period = 'morning_locations'
         elif 12 <= hour < 18:
@@ -306,21 +338,24 @@ class BehaviorAnalyzer:
         else:
             period = 'night_locations'
         
+        # Check if current location matches typical pattern for this period
         if period in profile['typical_locations']:
             typical_loc = profile['typical_locations'][period]
-            if typical_loc['count'] > 5:
+            if typical_loc['count'] > 5:  # Only check if we have enough data
                 distance = self._calculate_distance(
                     location_data['latitude'], location_data['longitude'],
                     typical_loc['latitude'], typical_loc['longitude']
                 )
                 
-                if distance > 500:
+                # If significantly far from typical location
+                if distance > 500:  # 500 meters
                     return f"Unusual location for {period.replace('_', ' ')}"
         
         return None
     
     def _calculate_distance(self, lat1, lng1, lat2, lng2):
-        lat_diff = (lat2 - lat1) * 111000
+        # Simple distance calculation (approximate)
+        lat_diff = (lat2 - lat1) * 111000  # meters per degree latitude
         lng_diff = (lng2 - lng1) * 111000 * np.cos(np.radians(lat1))
         return np.sqrt(lat_diff**2 + lng_diff**2)
     
@@ -359,10 +394,12 @@ class UserModel:
         return self.users.find_one({'email': email})
     
     def find_user_by_device_id(self, device_id):
+        """Find which user owns a specific device"""
         return self.users.find_one({'devices.device_id': device_id})
     
     def add_device(self, email, device_data):
         try:
+            # Check if device already exists in ANY user account
             existing_owner = self.find_user_by_device_id(device_data['device_id'])
             if existing_owner:
                 return {
@@ -374,7 +411,7 @@ class UserModel:
             
             device_data['created_at'] = datetime.now(timezone.utc)
             device_data['last_updated'] = datetime.now(timezone.utc)
-            device_data['owner_email'] = email
+            device_data['owner_email'] = email  # Track the owner
             
             result = self.users.update_one(
                 {'email': email},
@@ -387,6 +424,7 @@ class UserModel:
             }
         except Exception as e:
             if 'duplicate key error' in str(e).lower():
+                # Device already exists in another account (unique index violation)
                 existing_owner = self.find_user_by_device_id(device_data['device_id'])
                 owner_email = existing_owner['email'] if existing_owner else 'another user'
                 return {
@@ -398,6 +436,7 @@ class UserModel:
             raise e
     
     def update_device_location(self, email, device_id, location_data):
+        # Verify the device belongs to this user before updating
         device = self.find_device_by_id(email, device_id)
         if not device:
             return {'modified_count': 0, 'error': 'Device not found or not owned by user'}
@@ -427,19 +466,24 @@ class UserModel:
         return device is not None
     
     def check_device_exists_globally(self, device_id):
+        """Check if device exists in ANY user account"""
         owner = self.find_user_by_device_id(device_id)
         return owner is not None
     
     def get_device_owner(self, device_id):
+        """Get the email of the user who owns this device"""
         owner = self.find_user_by_device_id(device_id)
         return owner['email'] if owner else None
     
     def create_or_update_device(self, email, device_data, location_data):
+        """Unified method to create or update device with location - with device uniqueness check"""
         device_id = device_data['device_id']
         
+        # Check if device exists globally (in any account)
         existing_owner = self.find_user_by_device_id(device_id)
         if existing_owner:
             if existing_owner['email'] != email:
+                # Device belongs to another user
                 return {
                     'action': 'rejected', 
                     'device_id': device_id, 
@@ -447,6 +491,7 @@ class UserModel:
                     'owner_email': existing_owner['email']
                 }
             else:
+                # Device exists and belongs to this user - update location
                 result = self.update_device_location(email, device_id, location_data)
                 return {
                     'action': 'updated', 
@@ -455,6 +500,7 @@ class UserModel:
                     'owner_email': email
                 }
         else:
+            # Create new device - this will be blocked by unique index if device exists
             try:
                 device_data['last_location'] = location_data
                 device_data['created_at'] = datetime.now(timezone.utc)
@@ -500,6 +546,7 @@ class AlertModel:
     
     def get_user_alerts(self, email):
         alerts = list(self.alerts.find({'user_email': email}).sort('created_at', -1))
+        # Convert ObjectId to string for JSON serialization
         for alert in alerts:
             if '_id' in alert:
                 alert['_id'] = str(alert['_id'])
@@ -558,6 +605,7 @@ class AnomalyDetector:
         prediction = self.model.predict([features])
         return prediction[0] == -1
 
+# Initialize models - MOVED AFTER db DEFINITION
 user_model = UserModel(db)
 alert_model = AlertModel(db)
 anomaly_detector = AnomalyDetector()
@@ -575,8 +623,11 @@ def detect_mobile_device(user_agent):
     return any(indicator in user_agent_lower for indicator in mobile_indicators)
 
 def generate_device_id(email, user_agent, client_ip):
+    """Generate consistent device ID across different login sessions"""
+    # Use a combination that's stable for the same device
     device_string = f"{email}_{user_agent}"
     return hashlib.md5(device_string.encode()).hexdigest()
+
 
 @app.route('/')
 @cross_origin()
@@ -586,6 +637,7 @@ def home():
         'status': 'healthy',
         'timestamp': datetime.now(timezone.utc).isoformat()
     }), 200
+
 
 @app.route('/api/register', methods=['POST'])
 @cross_origin()
@@ -637,14 +689,18 @@ def login():
         client_ip = get_client_ip()
         user_agent = request.headers.get('User-Agent', '')
         
+        # FIXED: Use consistent device ID generation
         device_id = generate_device_id(email, user_agent, client_ip)
         
+        # Check if device exists globally
         existing_owner = user_model.find_user_by_device_id(device_id)
         device_owned_by_current_user = existing_owner and existing_owner['email'] == email
         
+        # FIXED: Better device detection logic
         existing_device = user_model.find_device_by_id(email, device_id)
         
         if existing_device:
+            # Device exists and belongs to this user
             device_info = {
                 'needs_setup': False,
                 'device_id': device_id,
@@ -655,6 +711,7 @@ def login():
             }
             print(f"✅ Device found in user account: {device_id}")
         elif existing_owner:
+            # Device exists but belongs to another user
             device_info = {
                 'needs_setup': True,
                 'device_id': device_id,
@@ -667,6 +724,7 @@ def login():
             }
             print(f"⚠️ Device owned by another user: {device_id}")
         else:
+            # New device - needs setup
             is_mobile = detect_mobile_device(user_agent)
             device_type = 'mobile' if is_mobile else 'laptop/desktop'
             
@@ -704,6 +762,7 @@ def add_device():
         if not device_data:
             return jsonify({'error': 'No device data provided'}), 400
         
+        # Check if device already exists globally
         existing_owner = user_model.find_user_by_device_id(device_data.get('device_id'))
         if existing_owner:
             if existing_owner['email'] == email:
@@ -725,8 +784,10 @@ def add_device():
         if result['modified_count'] == 0:
             return jsonify({'error': 'Failed to add device'}), 500
         
+        # Initialize behavior learning for this user
         behavior_analyzer.initialize_user_learning(email)
         
+        # Create welcome alert
         alert_data = {
             'user_email': email,
             'type': 'device_added',
@@ -762,9 +823,11 @@ def update_device_location():
         if not all([email, device_id, location]):
             return jsonify({'error': 'Missing required fields'}), 400
         
+        # First, check if device exists and belongs to this user
         device = user_model.find_device_by_id(email, device_id)
         
         if not device:
+            # Check if device exists globally
             existing_owner = user_model.find_user_by_device_id(device_id)
             if existing_owner:
                 return jsonify({
@@ -780,13 +843,16 @@ def update_device_location():
                     'device_id': device_id
                 }), 404
         else:
+            # Update existing device location
             result = user_model.update_device_location(email, device_id, location)
             
             if result.modified_count == 0:
                 return jsonify({'error': 'Device not found or no changes made'}), 404
             
+            # BEHAVIOR LEARNING: Record this location for behavior analysis
             behavior_analyzer.record_location_behavior(email, device, location)
             
+            # Check for behavior anomalies
             anomalies, analysis_message = behavior_analyzer.detect_behavior_anomaly(email, device, location)
             
             if anomalies:
@@ -800,6 +866,7 @@ def update_device_location():
                     }
                     alert_model.create_alert(alert_data)
             
+            # Check for ML anomalies
             if device:
                 anomaly_detector.add_training_data(device)
                 if anomaly_detector.detect_anomaly(device):
@@ -823,6 +890,7 @@ def update_device_location():
 @app.route('/api/create_or_update_device', methods=['POST'])
 @cross_origin()
 def create_or_update_device():
+    """Unified endpoint for device creation and location update"""
     try:
         data = request.json
         if not data:
@@ -835,11 +903,14 @@ def create_or_update_device():
         if not all([email, device_data, location_data]):
             return jsonify({'error': 'Missing required fields'}), 400
         
+        # Use the unified method
         result = user_model.create_or_update_device(email, device_data, location_data)
         
         if result['action'] == 'created':
+            # Initialize behavior learning for this user
             behavior_analyzer.initialize_user_learning(email)
             
+            # Record initial location for behavior analysis
             device_for_analysis = {
                 'device_id': device_data['device_id'],
                 'device_type': device_data.get('device_type', 'unknown'),
@@ -847,6 +918,7 @@ def create_or_update_device():
             }
             behavior_analyzer.record_location_behavior(email, device_for_analysis, location_data)
             
+            # Create device added alert
             alert_data = {
                 'user_email': email,
                 'type': 'device_added',
@@ -861,6 +933,7 @@ def create_or_update_device():
                 'device_id': result['device_id']
             }), 201
         elif result['action'] == 'updated':
+            # Record location for behavior analysis
             device = user_model.find_device_by_id(email, device_data['device_id'])
             if device:
                 behavior_analyzer.record_location_behavior(email, device, location_data)
@@ -870,7 +943,7 @@ def create_or_update_device():
                 'action': 'updated',
                 'device_id': result['device_id']
             }), 200
-        else:
+        else:  # rejected
             return jsonify({
                 'error': result['error'],
                 'owner_email': result['owner_email'],
@@ -894,6 +967,7 @@ def get_devices(email):
     try:
         devices = user_model.get_user_devices(email)
         
+        # Convert datetime objects to strings
         for device in devices:
             if 'last_updated' in device and isinstance(device['last_updated'], datetime):
                 device['last_updated'] = device['last_updated'].isoformat()
@@ -918,6 +992,7 @@ def check_device(email, device_id):
 @app.route('/api/check_device_global/<device_id>', methods=['GET'])
 @cross_origin()
 def check_device_global(device_id):
+    """Check if device exists in ANY user account and return owner info"""
     try:
         exists = user_model.check_device_exists_globally(device_id)
         owner_email = user_model.get_device_owner(device_id) if exists else None
@@ -942,6 +1017,7 @@ def get_alerts(email):
 @app.route('/api/behavior/progress/<email>', methods=['GET'])
 @cross_origin()
 def get_behavior_progress(email):
+    """Get behavior learning progress for a user"""
     try:
         progress = behavior_analyzer.get_learning_progress(email)
         summary = behavior_analyzer.get_behavior_summary(email)
@@ -957,6 +1033,7 @@ def get_behavior_progress(email):
 @app.route('/api/behavior/simulate_complete/<email>', methods=['POST'])
 @cross_origin()
 def simulate_learning_complete(email):
+    """Simulate complete learning for demo purposes"""
     try:
         if email in behavior_analyzer.user_profiles:
             behavior_analyzer.user_profiles[email]['learning_progress'] = 100
