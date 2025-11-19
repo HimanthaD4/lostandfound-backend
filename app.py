@@ -107,7 +107,8 @@ class BehaviorAnalyzer:
             'timestamp': current_time,
             'device_type': device_type,
             'campus_section': self._get_campus_section(location_data),
-            'hour': hour
+            'hour': hour,
+            'device_id': device_id  # CRITICAL: Track per device
         }
         
         # Categorize by time of day
@@ -442,6 +443,10 @@ class UserModel:
         device = self.find_device_by_id(email, device_id)
         if not device:
             return {'modified_count': 0, 'error': 'Device not found or not owned by user'}
+        
+        # CRITICAL FIX: Ensure location data is specific to this device
+        location_data['device_id'] = device_id
+        location_data['timestamp'] = datetime.now(timezone.utc)
         
         result = self.users.update_one(
             {'email': email, 'devices.device_id': device_id},
@@ -821,6 +826,10 @@ def update_device_location():
                     'device_id': device_id
                 }), 404
         else:
+            # CRITICAL FIX: Ensure location data is specific to this device
+            location['device_id'] = device_id
+            location['timestamp'] = datetime.now(timezone.utc).isoformat()
+            
             result = user_model.update_device_location(email, device_id, location)
             
             if result.modified_count == 0:
@@ -879,6 +888,10 @@ def create_or_update_device():
         
         if not all([email, device_data, location_data]):
             return jsonify({'error': 'Missing required fields'}), 400
+        
+        # CRITICAL FIX: Ensure location data is specific to this device
+        location_data['device_id'] = device_data['device_id']
+        location_data['timestamp'] = datetime.now(timezone.utc).isoformat()
         
         result = user_model.create_or_update_device(email, device_data, location_data)
         
@@ -1038,5 +1051,6 @@ if __name__ == '__main__':
     print("✅ Device uniqueness enforcement: ENABLED")
     print("🎯 Behavior Learning Engine: ENABLED")
     print("🔴 Real-time WebSocket updates: ENABLED")
+    print("🔧 CRITICAL FIX: Independent device location tracking: ENABLED")
     
     socketio.run(app, debug=False, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
