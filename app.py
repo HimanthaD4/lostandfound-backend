@@ -12,6 +12,7 @@ import threading
 import time
 import logging
 import os
+from flask_socketio import SocketIO, emit
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -20,13 +21,12 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "your-secret-key-here"
 
 # Configure CORS properly for all origins during development
-# CORS configuration for both development and production
 cors_origins = [
     "http://localhost:3000", 
     "http://192.168.1.125:3000", 
     "http://127.0.0.1:3000", 
     "http://10.185.94.208:3000",
-    "https://lostandfound-client-nu.vercel.app"  # Remove trailing slash
+    "https://lostandfound-client-nu.vercel.app"
 ]
 
 CORS(app, resources={
@@ -38,12 +38,15 @@ CORS(app, resources={
     }
 })
 
+# Initialize SocketIO for real-time communication
+socketio = SocketIO(app, cors_allowed_origins=cors_origins, async_mode='threading')
+
 # MongoDB connection
 mongodb_uri = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
 client = MongoClient(mongodb_uri, connectTimeoutMS=30000, socketTimeoutMS=30000)
 db = client['device_tracker']
 
-# Create unique index for device_id across all users - MOVED AFTER db DEFINITION
+# Create unique index for device_id across all users
 try:
     db.users.create_index([("devices.device_id", 1)], unique=True, sparse=True)
     print("✅ Unique index created for device_id across all users")
@@ -64,7 +67,7 @@ app.json_encoder = JSONEncoder
 class BehaviorAnalyzer:
     def __init__(self):
         self.user_profiles = {}
-        self.learning_period = timedelta(minutes=7)  # 7 minutes = 7 days simulation
+        self.learning_period = timedelta(minutes=7)
         self.learning_start_times = {}
     
     def initialize_user_learning(self, email):
@@ -73,10 +76,10 @@ class BehaviorAnalyzer:
                 'learning_start': datetime.now(timezone.utc),
                 'behavior_learned': False,
                 'daily_patterns': {
-                    'morning_locations': [],    # 6AM - 12PM
-                    'afternoon_locations': [],  # 12PM - 6PM  
-                    'evening_locations': [],    # 6PM - 12AM
-                    'night_locations': []       # 12AM - 6AM
+                    'morning_locations': [],
+                    'afternoon_locations': [], 
+                    'evening_locations': [],
+                    'night_locations': []
                 },
                 'device_movement_patterns': {},
                 'typical_locations': {},
@@ -160,7 +163,7 @@ class BehaviorAnalyzer:
         self.user_profiles[email]['learning_progress'] = progress_percent
         
         # Simulate day-by-day learning
-        simulated_days = int(progress_minutes)  # 1 minute = 1 day
+        simulated_days = int(progress_minutes)
         print(f"📅 {email}: Simulated {simulated_days}/7 days learned - {progress_percent:.1f}% complete")
     
     def _is_learning_complete(self, email):
@@ -248,7 +251,7 @@ class BehaviorAnalyzer:
             if typical_loc['count'] > 0:
                 total_locations += 1
                 # If user has significant locations in this period, consider it consistent
-                if typical_loc['count'] >= 3:  # At least 3 data points
+                if typical_loc['count'] >= 3:
                     consistent_locations += 1
         
         profile['schedule_consistency'] = consistent_locations / total_locations if total_locations > 0 else 0
@@ -276,7 +279,7 @@ class BehaviorAnalyzer:
         
         # Rule 2: Check for unusual movement times (especially for laptops)
         if device_type == 'laptop':
-            if hour < 6 or hour > 22:  # Late night/early morning
+            if hour < 6 or hour > 22:
                 anomalies.append("Laptop moving during unusual hours")
         
         # Rule 3: Check if device separation is suspicious
@@ -318,7 +321,7 @@ class BehaviorAnalyzer:
                 
                 # If mobile is very far from laptop and it's during class hours
                 current_hour = datetime.now(timezone.utc).hour
-                if distance > 1000 and (9 <= current_hour <= 17):  # 1km during class hours
+                if distance > 1000 and (9 <= current_hour <= 17):
                     return True
         
         return False
@@ -341,21 +344,21 @@ class BehaviorAnalyzer:
         # Check if current location matches typical pattern for this period
         if period in profile['typical_locations']:
             typical_loc = profile['typical_locations'][period]
-            if typical_loc['count'] > 5:  # Only check if we have enough data
+            if typical_loc['count'] > 5:
                 distance = self._calculate_distance(
                     location_data['latitude'], location_data['longitude'],
                     typical_loc['latitude'], typical_loc['longitude']
                 )
                 
                 # If significantly far from typical location
-                if distance > 500:  # 500 meters
+                if distance > 500:
                     return f"Unusual location for {period.replace('_', ' ')}"
         
         return None
     
     def _calculate_distance(self, lat1, lng1, lat2, lng2):
         # Simple distance calculation (approximate)
-        lat_diff = (lat2 - lat1) * 111000  # meters per degree latitude
+        lat_diff = (lat2 - lat1) * 111000
         lng_diff = (lng2 - lng1) * 111000 * np.cos(np.radians(lat1))
         return np.sqrt(lat_diff**2 + lng_diff**2)
     
@@ -411,7 +414,7 @@ class UserModel:
             
             device_data['created_at'] = datetime.now(timezone.utc)
             device_data['last_updated'] = datetime.now(timezone.utc)
-            device_data['owner_email'] = email  # Track the owner
+            device_data['owner_email'] = email
             
             result = self.users.update_one(
                 {'email': email},
@@ -424,7 +427,6 @@ class UserModel:
             }
         except Exception as e:
             if 'duplicate key error' in str(e).lower():
-                # Device already exists in another account (unique index violation)
                 existing_owner = self.find_user_by_device_id(device_data['device_id'])
                 owner_email = existing_owner['email'] if existing_owner else 'another user'
                 return {
@@ -441,13 +443,25 @@ class UserModel:
         if not device:
             return {'modified_count': 0, 'error': 'Device not found or not owned by user'}
         
-        return self.users.update_one(
+        result = self.users.update_one(
             {'email': email, 'devices.device_id': device_id},
             {'$set': {
                 'devices.$.last_location': location_data,
                 'devices.$.last_updated': datetime.now(timezone.utc)
             }}
         )
+        
+        # Emit real-time update via WebSocket
+        if result.modified_count > 0:
+            updated_device = self.find_device_by_id(email, device_id)
+            if updated_device:
+                socketio.emit('device_location_update', {
+                    'email': email,
+                    'device_id': device_id,
+                    'device_data': updated_device
+                })
+        
+        return result
     
     def get_user_devices(self, email):
         user = self.users.find_one({'email': email})
@@ -476,14 +490,13 @@ class UserModel:
         return owner['email'] if owner else None
     
     def create_or_update_device(self, email, device_data, location_data):
-        """Unified method to create or update device with location - with device uniqueness check"""
+        """Unified method to create or update device with location"""
         device_id = device_data['device_id']
         
         # Check if device exists globally (in any account)
         existing_owner = self.find_user_by_device_id(device_id)
         if existing_owner:
             if existing_owner['email'] != email:
-                # Device belongs to another user
                 return {
                     'action': 'rejected', 
                     'device_id': device_id, 
@@ -500,7 +513,7 @@ class UserModel:
                     'owner_email': email
                 }
         else:
-            # Create new device - this will be blocked by unique index if device exists
+            # Create new device
             try:
                 device_data['last_location'] = location_data
                 device_data['created_at'] = datetime.now(timezone.utc)
@@ -515,6 +528,14 @@ class UserModel:
                         'error': result['error'],
                         'owner_email': result['owner_email']
                     }
+                
+                # Emit new device via WebSocket
+                new_device = self.find_device_by_id(email, device_id)
+                if new_device:
+                    socketio.emit('new_device_added', {
+                        'email': email,
+                        'device_data': new_device
+                    })
                 
                 return {
                     'action': 'created', 
@@ -542,11 +563,21 @@ class AlertModel:
     def create_alert(self, alert_data):
         alert_data['created_at'] = datetime.now(timezone.utc)
         alert_data['resolved'] = False
-        return self.alerts.insert_one(alert_data)
+        
+        result = self.alerts.insert_one(alert_data)
+        
+        # Emit real-time alert via WebSocket
+        if result.inserted_id:
+            alert_data['_id'] = str(result.inserted_id)
+            socketio.emit('new_alert', {
+                'user_email': alert_data['user_email'],
+                'alert_data': alert_data
+            })
+        
+        return result
     
     def get_user_alerts(self, email):
         alerts = list(self.alerts.find({'user_email': email}).sort('created_at', -1))
-        # Convert ObjectId to string for JSON serialization
         for alert in alerts:
             if '_id' in alert:
                 alert['_id'] = str(alert['_id'])
@@ -605,7 +636,7 @@ class AnomalyDetector:
         prediction = self.model.predict([features])
         return prediction[0] == -1
 
-# Initialize models - MOVED AFTER db DEFINITION
+# Initialize models
 user_model = UserModel(db)
 alert_model = AlertModel(db)
 anomaly_detector = AnomalyDetector()
@@ -624,10 +655,26 @@ def detect_mobile_device(user_agent):
 
 def generate_device_id(email, user_agent, client_ip):
     """Generate consistent device ID across different login sessions"""
-    # Use a combination that's stable for the same device
     device_string = f"{email}_{user_agent}"
     return hashlib.md5(device_string.encode()).hexdigest()
 
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    print(f"Client connected: {request.sid}")
+    emit('connected', {'message': 'Connected to real-time updates'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f"Client disconnected: {request.sid}")
+
+@socketio.on('join_user_room')
+def handle_join_user_room(data):
+    email = data.get('email')
+    if email:
+        join_room(email)
+        print(f"User {email} joined their room")
+        emit('room_joined', {'message': f'Joined room for {email}'})
 
 @app.route('/')
 @cross_origin()
@@ -637,7 +684,6 @@ def home():
         'status': 'healthy',
         'timestamp': datetime.now(timezone.utc).isoformat()
     }), 200
-
 
 @app.route('/api/register', methods=['POST'])
 @cross_origin()
@@ -689,18 +735,14 @@ def login():
         client_ip = get_client_ip()
         user_agent = request.headers.get('User-Agent', '')
         
-        # FIXED: Use consistent device ID generation
         device_id = generate_device_id(email, user_agent, client_ip)
         
-        # Check if device exists globally
         existing_owner = user_model.find_user_by_device_id(device_id)
         device_owned_by_current_user = existing_owner and existing_owner['email'] == email
         
-        # FIXED: Better device detection logic
         existing_device = user_model.find_device_by_id(email, device_id)
         
         if existing_device:
-            # Device exists and belongs to this user
             device_info = {
                 'needs_setup': False,
                 'device_id': device_id,
@@ -711,7 +753,6 @@ def login():
             }
             print(f"✅ Device found in user account: {device_id}")
         elif existing_owner:
-            # Device exists but belongs to another user
             device_info = {
                 'needs_setup': True,
                 'device_id': device_id,
@@ -724,7 +765,6 @@ def login():
             }
             print(f"⚠️ Device owned by another user: {device_id}")
         else:
-            # New device - needs setup
             is_mobile = detect_mobile_device(user_agent)
             device_type = 'mobile' if is_mobile else 'laptop/desktop'
             
@@ -748,66 +788,6 @@ def login():
         logging.error(f"Login error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/add_device', methods=['POST'])
-@cross_origin()
-def add_device():
-    try:
-        data = request.json
-        if not data:
-            return jsonify({'error': 'No JSON data provided'}), 400
-            
-        email = data.get('email')
-        device_data = data.get('device_data')
-        
-        if not device_data:
-            return jsonify({'error': 'No device data provided'}), 400
-        
-        # Check if device already exists globally
-        existing_owner = user_model.find_user_by_device_id(device_data.get('device_id'))
-        if existing_owner:
-            if existing_owner['email'] == email:
-                return jsonify({'error': 'Device already exists in your account'}), 400
-            else:
-                return jsonify({
-                    'error': f'Device already registered to {existing_owner["email"]}',
-                    'owner_email': existing_owner['email']
-                }), 400
-        
-        result = user_model.add_device(email, device_data)
-        
-        if result['exists']:
-            return jsonify({
-                'error': result['error'],
-                'owner_email': result['owner_email']
-            }), 400
-        
-        if result['modified_count'] == 0:
-            return jsonify({'error': 'Failed to add device'}), 500
-        
-        # Initialize behavior learning for this user
-        behavior_analyzer.initialize_user_learning(email)
-        
-        # Create welcome alert
-        alert_data = {
-            'user_email': email,
-            'type': 'device_added',
-            'message': f"New device '{device_data.get('device_name', 'Unknown')}' was added to your account",
-            'device_id': device_data.get('device_id')
-        }
-        alert_model.create_alert(alert_data)
-        
-        return jsonify({'message': 'Device added successfully'}), 200
-    except Exception as e:
-        logging.error(f"Add device error: {str(e)}")
-        if 'duplicate key error' in str(e).lower():
-            existing_owner = user_model.find_user_by_device_id(device_data.get('device_id'))
-            owner_email = existing_owner['email'] if existing_owner else 'another user'
-            return jsonify({
-                'error': f'Device already registered to {owner_email}',
-                'owner_email': owner_email
-            }), 400
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/update_device_location', methods=['POST'])
 @cross_origin()
 def update_device_location():
@@ -823,11 +803,9 @@ def update_device_location():
         if not all([email, device_id, location]):
             return jsonify({'error': 'Missing required fields'}), 400
         
-        # First, check if device exists and belongs to this user
         device = user_model.find_device_by_id(email, device_id)
         
         if not device:
-            # Check if device exists globally
             existing_owner = user_model.find_user_by_device_id(device_id)
             if existing_owner:
                 return jsonify({
@@ -843,7 +821,6 @@ def update_device_location():
                     'device_id': device_id
                 }), 404
         else:
-            # Update existing device location
             result = user_model.update_device_location(email, device_id, location)
             
             if result.modified_count == 0:
@@ -903,14 +880,11 @@ def create_or_update_device():
         if not all([email, device_data, location_data]):
             return jsonify({'error': 'Missing required fields'}), 400
         
-        # Use the unified method
         result = user_model.create_or_update_device(email, device_data, location_data)
         
         if result['action'] == 'created':
-            # Initialize behavior learning for this user
             behavior_analyzer.initialize_user_learning(email)
             
-            # Record initial location for behavior analysis
             device_for_analysis = {
                 'device_id': device_data['device_id'],
                 'device_type': device_data.get('device_type', 'unknown'),
@@ -918,7 +892,6 @@ def create_or_update_device():
             }
             behavior_analyzer.record_location_behavior(email, device_for_analysis, location_data)
             
-            # Create device added alert
             alert_data = {
                 'user_email': email,
                 'type': 'device_added',
@@ -933,7 +906,6 @@ def create_or_update_device():
                 'device_id': result['device_id']
             }), 201
         elif result['action'] == 'updated':
-            # Record location for behavior analysis
             device = user_model.find_device_by_id(email, device_data['device_id'])
             if device:
                 behavior_analyzer.record_location_behavior(email, device, location_data)
@@ -943,7 +915,7 @@ def create_or_update_device():
                 'action': 'updated',
                 'device_id': result['device_id']
             }), 200
-        else:  # rejected
+        else:
             return jsonify({
                 'error': result['error'],
                 'owner_email': result['owner_email'],
@@ -967,7 +939,6 @@ def get_devices(email):
     try:
         devices = user_model.get_user_devices(email)
         
-        # Convert datetime objects to strings
         for device in devices:
             if 'last_updated' in device and isinstance(device['last_updated'], datetime):
                 device['last_updated'] = device['last_updated'].isoformat()
@@ -1061,10 +1032,11 @@ def test_connection():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting Flask server on port {port}...")
+    print(f"Starting Flask server with WebSocket support on port {port}...")
     print(f"Backend URL: http://0.0.0.0:{port}")
     print(f"API Health Check: http://0.0.0.0:{port}/api/health")
     print("✅ Device uniqueness enforcement: ENABLED")
     print("🎯 Behavior Learning Engine: ENABLED")
+    print("🔴 Real-time WebSocket updates: ENABLED")
     
-    app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
+    socketio.run(app, debug=False, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
