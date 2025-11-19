@@ -12,7 +12,6 @@ import threading
 import time
 import logging
 import os
-from flask_socketio import SocketIO, emit
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -37,9 +36,6 @@ CORS(app, resources={
         "supports_credentials": True
     }
 })
-
-# Initialize SocketIO for real-time communication
-socketio = SocketIO(app, cors_allowed_origins=cors_origins, async_mode='threading')
 
 # MongoDB connection
 mongodb_uri = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
@@ -456,16 +452,6 @@ class UserModel:
             }}
         )
         
-        # Emit real-time update via WebSocket
-        if result.modified_count > 0:
-            updated_device = self.find_device_by_id(email, device_id)
-            if updated_device:
-                socketio.emit('device_location_update', {
-                    'email': email,
-                    'device_id': device_id,
-                    'device_data': updated_device
-                })
-        
         return result
     
     def get_user_devices(self, email):
@@ -534,14 +520,6 @@ class UserModel:
                         'owner_email': result['owner_email']
                     }
                 
-                # Emit new device via WebSocket
-                new_device = self.find_device_by_id(email, device_id)
-                if new_device:
-                    socketio.emit('new_device_added', {
-                        'email': email,
-                        'device_data': new_device
-                    })
-                
                 return {
                     'action': 'created', 
                     'device_id': device_id, 
@@ -570,15 +548,6 @@ class AlertModel:
         alert_data['resolved'] = False
         
         result = self.alerts.insert_one(alert_data)
-        
-        # Emit real-time alert via WebSocket
-        if result.inserted_id:
-            alert_data['_id'] = str(result.inserted_id)
-            socketio.emit('new_alert', {
-                'user_email': alert_data['user_email'],
-                'alert_data': alert_data
-            })
-        
         return result
     
     def get_user_alerts(self, email):
@@ -662,24 +631,6 @@ def generate_device_id(email, user_agent, client_ip):
     """Generate consistent device ID across different login sessions"""
     device_string = f"{email}_{user_agent}"
     return hashlib.md5(device_string.encode()).hexdigest()
-
-# WebSocket event handlers
-@socketio.on('connect')
-def handle_connect():
-    print(f"Client connected: {request.sid}")
-    emit('connected', {'message': 'Connected to real-time updates'})
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print(f"Client disconnected: {request.sid}")
-
-@socketio.on('join_user_room')
-def handle_join_user_room(data):
-    email = data.get('email')
-    if email:
-        join_room(email)
-        print(f"User {email} joined their room")
-        emit('room_joined', {'message': f'Joined room for {email}'})
 
 @app.route('/')
 @cross_origin()
@@ -1045,12 +996,12 @@ def test_connection():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting Flask server with WebSocket support on port {port}...")
+    print(f"Starting Flask server on port {port}...")
     print(f"Backend URL: http://0.0.0.0:{port}")
     print(f"API Health Check: http://0.0.0.0:{port}/api/health")
     print("✅ Device uniqueness enforcement: ENABLED")
     print("🎯 Behavior Learning Engine: ENABLED")
-    print("🔴 Real-time WebSocket updates: ENABLED")
     print("🔧 CRITICAL FIX: Independent device location tracking: ENABLED")
+    print("🚫 WebSocket disabled - Using polling for real-time updates")
     
-    socketio.run(app, debug=False, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
+    app.run(debug=False, host='0.0.0.0', port=port)
