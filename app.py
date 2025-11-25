@@ -1120,6 +1120,6 @@ if __name__ == '__main__':
     print(f"Database Status: http://0.0.0.0:{port}/api/db-status")
     print("✅ Device uniqueness enforcement: ENABLED")
     print("🎯 Behavior Learning Engine: ENABLED")
-    print(f"🔗 MongoDB URI: {mongodb_uri[:50]}...")  # Show first 50 chars of URI
+    print(f"🔗 MongoDB URI: {mongodb_uri[:50]}...")  
     
     app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
