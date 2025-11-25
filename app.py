@@ -12,6 +12,7 @@ import threading
 import time
 import logging
 import os
+import urllib.parse
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -38,10 +39,43 @@ CORS(app, resources={
     }
 })
 
-# MongoDB connection
-mongodb_uri = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
-client = MongoClient(mongodb_uri, connectTimeoutMS=30000, socketTimeoutMS=30000)
-db = client['device_tracker']
+# MongoDB connection - UPDATED FOR FLEXIBILITY
+def get_mongodb_uri():
+    # Get from environment variable, or use default
+    uri = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/device_tracker')
+    
+    # If it contains @ in password, auto-encode it
+    if 'mongodb+srv://' in uri and '@' in uri.split('://')[1].split('@')[0]:
+        try:
+            # Extract and encode password
+            protocol = 'mongodb+srv://'
+            rest = uri.split('://')[1]
+            username = rest.split(':')[0]
+            password_with_host = rest.split(':')[1]
+            password = password_with_host.split('@')[0]
+            host_part = password_with_host.split('@')[1]
+            
+            encoded_password = urllib.parse.quote_plus(password)
+            uri = f"{protocol}{username}:{encoded_password}@{host_part}"
+            print("🔐 Auto-encoded MongoDB password")
+        except:
+            print("⚠️ Could not auto-encode password, using original URI")
+            pass  # If parsing fails, use original URI
+    
+    return uri
+
+mongodb_uri = get_mongodb_uri()
+
+try:
+    client = MongoClient(mongodb_uri, connectTimeoutMS=30000, socketTimeoutMS=30000)
+    db = client.get_database()  # This automatically uses database from connection string
+    print("✅ MongoDB connected successfully!")
+except Exception as e:
+    print(f"❌ MongoDB connection failed: {e}")
+    # Fallback to local database
+    client = MongoClient('mongodb://localhost:27017/', connectTimeoutMS=30000, socketTimeoutMS=30000)
+    db = client['device_tracker']
+    print("🔄 Using fallback local database")
 
 # Create unique index for device_id across all users - MOVED AFTER db DEFINITION
 try:
@@ -1059,12 +1093,33 @@ def health_check():
 def test_connection():
     return jsonify({'message': 'Backend is working!', 'timestamp': datetime.now(timezone.utc).isoformat()}), 200
 
+@app.route('/api/db-status', methods=['GET'])
+@cross_origin()
+def db_status():
+    """Check MongoDB connection status"""
+    try:
+        # Test database connection
+        db.command('ping')
+        return jsonify({
+            'status': 'connected',
+            'database': db.name,
+            'message': 'MongoDB connection is healthy'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'disconnected',
+            'error': str(e),
+            'message': 'MongoDB connection failed'
+        }), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print(f"Starting Flask server on port {port}...")
     print(f"Backend URL: http://0.0.0.0:{port}")
     print(f"API Health Check: http://0.0.0.0:{port}/api/health")
+    print(f"Database Status: http://0.0.0.0:{port}/api/db-status")
     print("✅ Device uniqueness enforcement: ENABLED")
     print("🎯 Behavior Learning Engine: ENABLED")
+    print(f"🔗 MongoDB URI: {mongodb_uri[:50]}...")  # Show first 50 chars of URI
     
     app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
