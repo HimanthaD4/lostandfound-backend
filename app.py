@@ -13,20 +13,18 @@ import time
 import logging
 import os
 
-# Configure logging
+
 logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "your-secret-key-here"
 
-# Configure CORS properly for all origins during development
-# CORS configuration for both development and production
 cors_origins = [
     "http://localhost:3000", 
     "http://192.168.1.125:3000", 
     "http://127.0.0.1:3000", 
     "http://10.185.94.208:3000",
-    "https://lostandfound-client-nu.vercel.app"  # Remove trailing slash
+    "https://lostandfound-client-nu.vercel.app" 
 ]
 
 CORS(app, resources={
@@ -43,7 +41,7 @@ mongodb_uri = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
 client = MongoClient(mongodb_uri, connectTimeoutMS=30000, socketTimeoutMS=30000)
 db = client['device_tracker']
 
-# Create unique index for device_id across all users - MOVED AFTER db DEFINITION
+
 try:
     db.users.create_index([("devices.device_id", 1)], unique=True, sparse=True)
     print("✅ Unique index created for device_id across all users")
@@ -64,8 +62,7 @@ app.json_encoder = JSONEncoder
 class BehaviorAnalyzer:
     def __init__(self):
         self.user_profiles = {}
-        self.learning_period = timedelta(minutes=7)  # 7 minutes = 7 days simulation
-        self.learning_start_times = {}
+        self.learning_period = timedelta(minutes=7)  
     
     def initialize_user_learning(self, email):
         if email not in self.user_profiles:
@@ -73,10 +70,10 @@ class BehaviorAnalyzer:
                 'learning_start': datetime.now(timezone.utc),
                 'behavior_learned': False,
                 'daily_patterns': {
-                    'morning_locations': [],    # 6AM - 12PM
-                    'afternoon_locations': [],  # 12PM - 6PM  
-                    'evening_locations': [],    # 6PM - 12AM
-                    'night_locations': []       # 12AM - 6AM
+                    'morning_locations': [],    
+                    'afternoon_locations': [],  
+                    'evening_locations': [],    
+                    'night_locations': []       
                 },
                 'device_movement_patterns': {},
                 'typical_locations': {},
