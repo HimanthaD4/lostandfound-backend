@@ -9,6 +9,6 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: MONGODB_URI
-        value: mongodb+srv://nethmi:Nelneth@2001@cluster0.zgrqgjb.mongodb.net/devicetracker?appName=Cluster0
+        value: mongodb+srv://hima:hima@foodie.ucvzre5.mongodb.net/device_tracker?retryWrites=true&w=majority
       - key: PORT
         value: 10000
